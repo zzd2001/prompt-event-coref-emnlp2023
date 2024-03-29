@@ -1,3 +1,4 @@
+# 基础包
 import os
 import logging
 import json
@@ -8,7 +9,8 @@ from transformers import AutoConfig, AutoTokenizer
 from transformers import AdamW, get_scheduler
 from sklearn.metrics import classification_report
 import sys
-sys.path.append('../../')
+sys.path.append('../../')  # 在系统路径中增加指定目录
+
 from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
@@ -17,11 +19,11 @@ from src.coref_prompt.modeling import BertForMixPrompt, RobertaForMixPrompt
 from src.coref_prompt.modeling import BertForSimpMixPrompt, RobertaForSimpMixPrompt
 from src.coref_prompt.prompt import EVENT_SUBTYPES, id2subtype
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
-
+# 配置logger，指定log的输出格式：时间+信息级别+logger name+信息
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
                     level=logging.INFO)
-logger = logging.getLogger("Model")
+logger = logging.getLogger("Model") # 创建一个model的logger实例对象，之后可以使用logger.info('message')
 
 MIX_PROMPT_MODELS = {
     'bert': BertForMixPrompt, 
@@ -34,6 +36,7 @@ SIMP_MIX_PROMPT_MODELS = {
 
 def to_device(args, batch_data):
     new_batch_data = {}
+    # 针对不同的batch内的数据类型，转换为对应的格式，放到字典的指定值
     for k, v in batch_data.items():
         if k in ['batch_inputs', 'batch_mask_inputs']:
             new_batch_data[k] = {
@@ -76,7 +79,7 @@ def test_loop(args, dataloader, model):
             outputs = model(**batch_data)
             logits = outputs[1]
             predictions += logits.argmax(dim=-1).cpu().numpy().tolist()
-    return classification_report(true_labels, predictions, output_dict=True)
+    return classification_report(true_labels, predictions, output_dict=True) # 返回分类指标的一个字典
 
 def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verbalizer):
     """ Train the model """
@@ -86,12 +89,18 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verba
     dev_dataloader = get_dataLoader(args, dev_dataset, tokenizer, prompt_type, verbalizer, with_mask=False, shuffle=False)
     t_total = len(train_dataloader) * args.num_train_epochs
     # Prepare optimizer and schedule (linear warmup and decay)
+    # 针对no_decay的参数，无需进行参数优化，以保证PLM的特性，针对其他的参数，需要进行优化
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], "weight_decay": args.weight_decay},
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0}
     ]
     args.warmup_steps = int(t_total * args.warmup_proportion)
+    '''
+    betas=(args.adam_beta1, args.adam_beta2)：这两个参数是Adam优化算法中的衰减率参数，通常用于计算梯度及其平方的指数移动平均值。beta1通常设置得比较高（例如0.9），而beta2通常接近1（例如0.999）。这些值决定了过去梯度的权重，影响着优化器如何根据过去的梯度信息调整参数更新方向和幅度。
+
+    eps=args.adam_epsilon：这是一个非常小的数（例如1e-8），用来提高数值稳定性，避免在计算时出现除以零的错误。
+    '''
     optimizer = AdamW(
         optimizer_grouped_parameters, 
         lr=args.learning_rate, 
@@ -109,6 +118,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verba
     logger.info(f"Num examples - {len(train_dataset)}")
     logger.info(f"Num Epochs - {args.num_train_epochs}")
     logger.info(f"Total optimization steps - {t_total}")
+    # 将本次参数设置写入文件保存
     with open(os.path.join(args.output_dir, 'args.txt'), 'wt') as f:
         f.write(str(args))
 
@@ -120,11 +130,13 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verba
         metrics = test_loop(args, dev_dataloader, model)
         dev_p, dev_r, dev_f1 = metrics['1']['precision'], metrics['1']['recall'], metrics['1']['f1-score']
         logger.info(f'Dev: P - {(100*dev_p):0.4f} R - {(100*dev_r):0.4f} F1 - {(100*dev_f1):0.4f}')
+        # 如果验证集中效果有提升，那么保存模型的权重
         if dev_f1 > best_f1:
             best_f1 = dev_f1
             logger.info(f'saving new weights to {args.output_dir}...\n')
             save_weight = f'epoch_{epoch+1}_dev_f1_{(100*dev_f1):0.4f}_weights.bin'
             torch.save(model.state_dict(), os.path.join(args.output_dir, save_weight))
+        # 将每一轮训练中的dev数据集表现写入文件
         with open(os.path.join(args.output_dir, 'dev_metrics.txt'), 'at') as f:
             f.write(f'epoch_{epoch+1}\n' + json.dumps(metrics, cls=NpEncoder) + '\n\n')
     logger.info("Done!")
@@ -132,6 +144,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verba
 def test(args, test_dataset, model, tokenizer, save_weights:list, prompt_type, verbalizer):
     test_dataloader = get_dataLoader(args, test_dataset, tokenizer, prompt_type=prompt_type, verbalizer=verbalizer, with_mask=False, shuffle=False)
     logger.info('***** Running testing *****')
+    # 在test步骤中，针对dev每轮训练有提升的model权重都进行测试
     for save_weight in save_weights:
         logger.info(f'loading {save_weight}...')
         model.load_state_dict(torch.load(os.path.join(args.output_dir, save_weight)))
@@ -152,17 +165,20 @@ def predict(
         '''
         for idx, sent in enumerate(sent_list):
             s_start, s_end = sent['start'], sent['start'] + len(sent['text']) - 1
+            # 如果找得到event对应的句子，返回对应句子的id和该event在句子开始的位置
             if s_start <= event_start <= s_end:
-                e_s_start = event_start - s_start
-                assert sent['text'][e_s_start:e_s_start+len(trigger)] == trigger
+                e_s_start = event_start - s_start  # 事件在句子中出现的位置
+                assert sent['text'][e_s_start:e_s_start+len(trigger)] == trigger  # assert检查，声明trigger必须对应sent的位置
                 return idx, e_s_start
+        # 如果没有找到event对应的句子，则打印输出事件开始的位置和触发词，以及每个句子开始和结束的位置
         print(event_start, trigger, '\n')
         for sent in sent_list:
             print(sent['start'], sent['start'] + len(sent['text']) - 1)
         return None
-
+    # 两个事件对应句子的id和在句子中开始的位置
     e1_sent_idx, e1_sent_start = find_event_sent(e1_global_offset, e1_trigger, sentences)
     e2_sent_idx, e2_sent_start = find_event_sent(e2_global_offset, e2_trigger, sentences)
+
     prompt_data = create_prompt(
         e1_sent_idx, e1_sent_start, e1_trigger, e1_related_info, 
         e2_sent_idx, e2_sent_start, e2_trigger, e2_related_info, 
@@ -172,8 +188,11 @@ def predict(
     )
     prompt_text = prompt_data['prompt']
     # convert char offsets to token idxs
+    # 把位置转换为对应token的idxs
     encoding = tokenizer(prompt_text)
     mask_idx = encoding.char_to_token(prompt_data['mask_offset'])
+    # 在第三种模版中，存在两种匹配的检测作为ECR判定的辅助任务：事件类型匹配和事件论元匹配
+    # 这个分支判断比较负责，如果设为-1，表示不需要该位置的匹配
     type_match_mask_idx, arg_match_mask_idx = (
         -1, -1
     ) if prompt_type == 'ma_remove-match' else (
@@ -184,12 +203,14 @@ def predict(
         encoding.char_to_token(prompt_data['type_match_mask_offset']), 
         encoding.char_to_token(prompt_data['arg_match_mask_offset']), 
     )
+    # 寻找事件对应的token的开始下标和结束下标
     e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
         encoding.char_to_token(prompt_data['e1s_offset']), 
         encoding.char_to_token(prompt_data['e1e_offset']), 
         encoding.char_to_token(prompt_data['e2s_offset']), 
         encoding.char_to_token(prompt_data['e2e_offset'])
     )
+    # 在第二种模版中，两个事件类型的推测。与上面类似，-1表示不需要该种类型的推测
     e1_type_mask_idx, e2_type_mask_idx = (
         -1, -1
      ) if prompt_type == 'ma_remove-anchor' else (
@@ -199,7 +220,8 @@ def predict(
     assert None not in [
         mask_idx, type_match_mask_idx, arg_match_mask_idx, 
         e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx
-    ]
+    ] # 非空检查
+    # 
     event_idx = [e1s_idx, e1e_idx, e2s_idx, e2e_idx]
     inputs = tokenizer(
         prompt_text, 
@@ -226,7 +248,8 @@ def predict(
         'subtype_label_word_id': [
             verbalizer[id2subtype[s_id]]['id'] 
             for s_id in range(len(EVENT_SUBTYPES) + 1)
-        ]
+        ]  
+    # 把第三个模版中的所有匹配删除
     } if prompt_type == 'ma_remove-match' else {
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
@@ -273,6 +296,7 @@ def predict(
         outputs = model(**inputs)
         logits = outputs[1]
         prob = torch.nn.functional.softmax(logits, dim=-1)[0]
+    # 返回一个样本的预测label以及自信分数
     pred = logits.argmax(dim=-1)[0].item()
     prob = prob[pred].item()
     return pred, prob
@@ -290,8 +314,10 @@ if __name__ == '__main__':
     seed_everything(args.seed)
     # Load pretrained model and tokenizer
     logger.info(f'loading pretrained model and tokenizer of {args.model_type} ...')
+    # cache_dir节省模型的下载时间，第一次从hf官方下载，之后再使用该model可以直接从cache_dir的路径中加载
     config = AutoConfig.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, max_length=args.max_seq_length, cache_dir=args.cache_dir)
+    # SIMP_MIX_PROMPT_MODELS代表不使用anchor模版，MIX_PROMPT_MODELS代表使用anchor模版
     if args.prompt_type == 'ma_remove-anchor': 
         model = SIMP_MIX_PROMPT_MODELS[args.model_type].from_pretrained(
             args.model_checkpoint,
@@ -306,11 +332,17 @@ if __name__ == '__main__':
             args=args, 
             cache_dir=args.cache_dir
         ).to(args.device)
+    # 四种类型的special token
+    # base:基础的特殊token，比如[SEP],[CLS]
+    # connect:将不同的template连接的特殊token
+    # match：是否匹配的token，可学习的虚拟token
+    # event_subtype：事件类型的token（一般为33种），可学习的虚拟token
     base_sp_tokens = get_special_tokens(args.model_type, 'base')
     connect_tokens = get_special_tokens(args.model_type, 'connect')
     match_tokens = get_special_tokens(args.model_type, 'match')
     event_subtype_tokens = get_special_tokens(args.model_type, 'event_subtype')
     print('c' in args.prompt_type)
+    # 根据prompt的类型设定对应的特殊token的使用
     sp_tokens = (
         base_sp_tokens + match_tokens 
         if args.prompt_type == 'ma_remove-anchor' else
@@ -322,10 +354,14 @@ if __name__ == '__main__':
     )
     logger.info(f"adding special mark tokens {sp_tokens} to tokenizer...")
     tokenizer.add_special_tokens({'additional_special_tokens': sp_tokens})
-    model.resize_token_embeddings(len(tokenizer))
+    model.resize_token_embeddings(len(tokenizer))  # 这一步根据词表大小，调整head的维度
+
     # build verbalizer
+    # 
     verbalizer = create_verbalizer(tokenizer, args.model_type, args.prompt_type)
     logger.info(f"verbalizer: {verbalizer}")
+    # 四种类型prompt_type：ma_remove-anchor，ma_remove-match，ma_remove-subtype-match，ma_remove-arg-match
+    # 如果没有设置，则选择完整的三种类型的prompt
     if 'c' in args.prompt_type and not args.prompt_type.startswith('ma'):
         logger.info(f"initialize embeddings for {verbalizer['coref']['token']} and {verbalizer['non-coref']['token']}...")
         subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
