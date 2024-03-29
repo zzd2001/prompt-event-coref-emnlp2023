@@ -357,7 +357,6 @@ if __name__ == '__main__':
     model.resize_token_embeddings(len(tokenizer))  # 这一步根据词表大小，调整head的维度
 
     # build verbalizer
-    # 
     verbalizer = create_verbalizer(tokenizer, args.model_type, args.prompt_type)
     logger.info(f"verbalizer: {verbalizer}")
     # 四种类型prompt_type：ma_remove-anchor，ma_remove-match，ma_remove-subtype-match，ma_remove-arg-match
@@ -366,13 +365,16 @@ if __name__ == '__main__':
         logger.info(f"initialize embeddings for {verbalizer['coref']['token']} and {verbalizer['non-coref']['token']}...")
         subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
         match_sp_token_num = 2
+        # refer_token和norefer_token在词表的位置
         refer_idx, norefer_idx = -(subtype_sp_token_num+match_sp_token_num+2), -(subtype_sp_token_num+match_sp_token_num+1)
         with torch.no_grad():
+            # 构造'coref'和'non-coref'的可学习虚拟token
             refer_tokenized = tokenizer.tokenize(verbalizer['coref']['description'])
             refer_tokenized_ids = tokenizer.convert_tokens_to_ids(refer_tokenized)
             norefer_tokenized = tokenizer.tokenize(verbalizer['non-coref']['description'])
             norefer_tokenized_ids = tokenizer.convert_tokens_to_ids(norefer_tokenized)
             if args.model_type == 'bert':
+                # 其实就是description的token embedding取平均作为这两个词的虚拟token，requires_grad_=True表示这个虚拟token是可以学习的
                 new_embedding = model.bert.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
                 model.bert.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
                 new_embedding = model.bert.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
@@ -392,10 +394,12 @@ if __name__ == '__main__':
                 model.longformer.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
                 new_embedding = model.longformer.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
                 model.longformer.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+    # 如果prompt_type不移除第三种prompt的所有匹配，则构造match 和 mismatch的虚拟token
     if args.prompt_type != 'ma_remove-match':
         logger.info(f"initialize embeddings for {verbalizer['match']['token']} and {verbalizer['mismatch']['token']}...")
         subtype_sp_token_num = 0 if args.prompt_type == 'ma_remove-anchor' else len(EVENT_SUBTYPES) + 1
         match_idx, mismatch_idx = -(subtype_sp_token_num+2), -(subtype_sp_token_num+1)
+        # match 和 mismatch的虚拟token构造原理与上面相同
         with torch.no_grad():
             match_tokenized = tokenizer.tokenize(verbalizer['match']['description'])
             match_tokenized_ids = tokenizer.convert_tokens_to_ids(match_tokenized)
@@ -421,6 +425,7 @@ if __name__ == '__main__':
                 model.longformer.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
                 new_embedding = model.longformer.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
                 model.longformer.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+    # 如果prompt_type不移除第二种prompt的类型推断，则构造event subtype的 special tokens
     if args.prompt_type != 'ma_remove-anchor': 
         logger.info(f"initialize embeddings for event subtype special tokens...")
         subtype_descriptions = [
@@ -444,7 +449,9 @@ if __name__ == '__main__':
                     model.longformer.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
     # Training
     if args.do_train:
+        # 采用降采样
         if args.sample_strategy == 'no':
+            # train_simi_file ??
             train_dataset = KBPCoref(
                 args.train_file, 
                 args.train_simi_file, 
@@ -454,6 +461,7 @@ if __name__ == '__main__':
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length
             )
+        # 不采用降采样
         else:
             train_dataset = KBPCorefTiny(
                 args.train_file, 
@@ -482,7 +490,9 @@ if __name__ == '__main__':
         )
         labels = [dev_dataset[s_idx]['label'] for s_idx in range(len(dev_dataset))]
         logger.info(f"[Dev] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
+        # 训练模型
         train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type=args.prompt_type, verbalizer=verbalizer)
+    # 列出有效果进步而保存的模型权重文件    
     save_weights = [file for file in os.listdir(args.output_dir) if file.endswith('.bin')]
     # Testing
     if args.do_test:
@@ -498,9 +508,17 @@ if __name__ == '__main__':
         labels = [test_dataset[s_idx]['label'] for s_idx in range(len(test_dataset))]
         logger.info(f"[Test] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         logger.info(f'loading trained weights from {args.output_dir} ...')
+    # 测试模型，在test步骤中，针对dev每轮训练有提升的model权重都进行测试
         test(args, test_dataset, model, tokenizer, save_weights, prompt_type=args.prompt_type, verbalizer=verbalizer)
+
     # Predicting
     if args.do_predict:
+        # 目的：汇总归属于同一个doc的所有句子
+        '''
+        使用defaultdict(list)而不是普通字典的好处在于，当你尝试向sentence_dict或sentence_len_dict中添加一个新句子或句子长度时，如果对应的键（文件名）还不存在，defaultdict会自动创建这个键，并将其值初始化为一个空列表。这样就省去了手动检查键是否存在并初始化的步骤，使代码更简洁。
+        sentence_dict:保存每个文件id以及对应的句子
+        sentence_len_dict:保存每个文件id以及对应的句子长度
+        '''
         sentence_dict = defaultdict(list) # {filename: [Sentence]}
         sentence_len_dict = defaultdict(list) # {filename: [sentence length]}
         related_dict = get_pred_related_info(args.pred_test_simi_file)
@@ -513,7 +531,7 @@ if __name__ == '__main__':
                 sentence_len_dict[sample['doc_id']] = sentences_lengths
         
         pred_event_file = '../../data/epoch_3_test_pred_events.json'
-
+        # 遍历每个效果有提升而保存的权重
         for best_save_weight in save_weights:
             logger.info(f'loading weights from {best_save_weight}...')
             model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)))
@@ -523,12 +541,13 @@ if __name__ == '__main__':
             model.eval()
             with open(pred_event_file, 'rt' , encoding='utf-8') as f_in:
                 for line in tqdm(f_in.readlines()):
-                    sample = json.loads(line.strip())
-                    events_from_file = sample['pred_label']
+                    sample = json.loads(line.strip())  # 一个样本是一篇文档
+                    events_from_file = sample['pred_label'] # 这篇文档中的所有事件
                     sentences = sentence_dict[sample['doc_id']]
                     sentence_lengths = sentence_len_dict[sample['doc_id']]
                     doc_related_info = related_dict[sample['doc_id']]
                     preds, probs = [], []
+                    # 遍历这篇文档中所有可能的事件对
                     for i in range(len(events_from_file) - 1):
                         for j in range(i + 1, len(events_from_file)):
                             e_i, e_j = events_from_file[i], events_from_file[j]
@@ -539,8 +558,9 @@ if __name__ == '__main__':
                                 sentences, sentence_lengths, 
                                 args.prompt_type, args.select_arg_strategy, verbalizer
                             )
-                            preds.append(pred)
-                            probs.append(prob)
+                            preds.append(pred) # 保存该事件对的预测标签
+                            probs.append(prob) # 保存该事件对的预测概率值
+                    # 保存该文档所有事件对的预测结果
                     results.append({
                         "doc_id": sample['doc_id'], 
                         "document": sample['document'], 
@@ -558,4 +578,5 @@ if __name__ == '__main__':
             save_name = f'_{args.model_type}_{args.prompt_type}_test_pred_corefs.json'
             with open(os.path.join(args.output_dir, best_save_weight + save_name), 'wt', encoding='utf-8') as f:
                 for example_result in results:
+                    # 保存预测结果，一行对应一个文档
                     f.write(json.dumps(example_result) + '\n')
