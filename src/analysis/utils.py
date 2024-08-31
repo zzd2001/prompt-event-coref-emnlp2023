@@ -222,20 +222,18 @@ def get_event_pair_info(
             sentences = sample['sentences']
             event_pairs = {}
             for i in range(len(events) - 1):
-                e_i_start = events[i]['start']
-                e_i_pretty_sent = pretty_event_mention(sentences, events[i]['sent_idx'], events[i]['sent_start'], events[i]['trigger'])
-                e_i_related_info = gold_related_dict[sample['doc_id']][e_i_start]
-                e_i_sent_idx = events[i]['sent_idx']
                 for j in range(i + 1, len(events)):
-                    e_j_start = events[j]['start']
-                    e_j_pretty_sent = pretty_event_mention(sentences, events[j]['sent_idx'], events[j]['sent_start'], events[j]['trigger'])
+                    e_i, e_j = events[i], events[j]
+                    if e_i['start'] > e_j['start']:
+                        e_i, e_j = e_j, e_i
+                    e_i_start = e_i['start']
+                    e_i_pretty_sent = pretty_event_mention(sentences, e_i['sent_idx'], e_i['sent_start'], e_i['trigger'])
+                    e_i_related_info = gold_related_dict[sample['doc_id']][e_i_start]
+                    e_i_sent_idx = e_i['sent_idx']
+                    e_j_start = e_j['start']
+                    e_j_pretty_sent = pretty_event_mention(sentences, e_j['sent_idx'], e_j['sent_start'], e_j['trigger'])
                     e_j_related_info = gold_related_dict[sample['doc_id']][e_j_start]
-                    e_j_sent_idx = events[j]['sent_idx']
-                    if e_i_start > e_j_start: # make shure e_i_start < e_j_start
-                        e_i_start, e_j_start = e_j_start, e_i_start
-                        e_i_pretty_sent, e_j_pretty_sent = e_j_pretty_sent, e_i_pretty_sent
-                        e_i_related_info, e_j_related_info = e_j_related_info, e_i_related_info
-                        e_i_sent_idx, e_j_sent_idx = e_j_sent_idx, e_i_sent_idx
+                    e_j_sent_idx = e_j['sent_idx']
                     arg_status = get_event_arg_status_easy(e_i_related_info, e_j_related_info) if mode == 'easy' else \
                         get_event_arg_status_filter(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
                     event_pairs[f'{e_i_start}-{e_j_start}'] = {
@@ -270,16 +268,18 @@ def get_event_pair_info(
             events = sample['events']
             sentences = sample['sentences']
             for i in range(len(events) - 1):
-                e_i_start = events[i]['start']
-                e_i_sent_idx, e_i_sent_start = _find_event_sent(events[i]['start'], events[i]['trigger'], sentences)
-                e_i_pretty_sent = pretty_event_mention(sentences, e_i_sent_idx, e_i_sent_start, events[i]['trigger'])
-                e_i_related_info = pred_related_dict[sample['doc_id']][e_i_start]
                 for j in range(i + 1, len(events)):
-                    e_j_start = events[j]['start']
-                    e_j_sent_idx, e_j_sent_start = _find_event_sent(events[j]['start'], events[j]['trigger'], sentences)
-                    e_j_pretty_sent = pretty_event_mention(sentences, e_j_sent_idx, e_j_sent_start, events[j]['trigger'])
+                    e_i, e_j = events[i], events[j]
+                    if e_i['start'] > e_j['start']:
+                        e_i, e_j = e_j, e_i
+                    e_i_start = e_i['start']
+                    e_i_sent_idx, e_i_sent_start = _find_event_sent(e_i['start'], e_i['trigger'], sentences)
+                    e_i_pretty_sent = pretty_event_mention(sentences, e_i_sent_idx, e_i_sent_start, e_i['trigger'])
+                    e_i_related_info = pred_related_dict[sample['doc_id']][e_i_start]
+                    e_j_start = e_j['start']
+                    e_j_sent_idx, e_j_sent_start = _find_event_sent(e_j['start'], e_j['trigger'], sentences)
+                    e_j_pretty_sent = pretty_event_mention(sentences, e_j_sent_idx, e_j_sent_start, e_j['trigger'])
                     e_j_related_info = pred_related_dict[sample['doc_id']][e_j_start]
-                    assert e_i_start < e_j_start
                     arg_status = get_event_arg_status_easy(e_i_related_info, e_j_related_info) if mode == 'easy' else \
                         get_event_arg_status_filter(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
                     event_pair_info_dict[sample['doc_id']][f'{e_i_start}-{e_j_start}'] = { # overwrite same event-pair data
@@ -325,15 +325,13 @@ def get_gold_corefs(gold_test_file:str) -> dict:
             events = sample['events']
             event_pairs = {}
             for i in range(len(events) - 1):
-                e_i_start = events[i]['start']
-                e_i_cluster_id, e_i_link_len = _get_event_cluster_id_and_link_len(events[i]['event_id'], clusters)
                 for j in range(i + 1, len(events)):
-                    e_j_start = events[j]['start']
-                    e_j_cluster_id, e_j_link_len = _get_event_cluster_id_and_link_len(events[j]['event_id'], clusters)
-                    if e_i_start > e_j_start:
-                        e_i_start, e_j_start = e_j_start, e_i_start
-                        e_i_cluster_id, e_i_link_len, e_j_cluster_id, e_j_link_len = e_j_cluster_id, e_j_link_len, e_i_cluster_id, e_i_link_len
-                    event_pairs[f'{e_i_start}-{e_j_start}'] = {
+                    e_i, e_j = events[i], events[j]
+                    if e_i['start'] > e_j['start']:
+                        e_i, e_j = e_j, e_i
+                    e_i_cluster_id, e_i_link_len = _get_event_cluster_id_and_link_len(e_i['event_id'], clusters)
+                    e_j_cluster_id, e_j_link_len = _get_event_cluster_id_and_link_len(e_j['event_id'], clusters)
+                    event_pairs[f"{e_i['start']}-{e_j['start']}"] = {
                         'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
                         'e_i_link_len': e_i_link_len, 'e_j_link_len': e_j_link_len
                     }
@@ -350,11 +348,11 @@ def get_pred_coref_results(pred_test_file:str) -> dict:
             event_pairs = {}
             event_pair_idx = 0
             for i in range(len(events) - 1):
-                e_i_start = events[i]['start']
                 for j in range(i + 1, len(events)):
-                    e_j_start = events[j]['start']
-                    assert e_i_start < e_j_start
-                    event_pairs[f'{e_i_start}-{e_j_start}'] = {
+                    e_i, e_j = events[i], events[j]
+                    if e_i['start'] > e_j['start']:
+                        e_i, e_j = e_j, e_i
+                    event_pairs[f"{e_i['start']}-{e_j['start']}"] = {
                         'coref': pred_labels[event_pair_idx], 
                         'e_i_link_len': 0, 'e_j_link_len': 0
                     }
