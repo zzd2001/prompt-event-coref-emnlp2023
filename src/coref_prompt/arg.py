@@ -36,19 +36,17 @@ def parse_args():
     parser.add_argument("--select_arg_strategy", type=str, required=True, choices=['no_filter', 'filter_related_args', 'filter_all'])
     # ？？ 
     parser.add_argument("--with_mask", action="store_true", help="Whether to input the extra prompt with all triggers masked.")
-    # tensor matching的方式
+    # tensor matching的参数
     parser.add_argument("--matching_style", default="none", type=str, required=True, 
         help="Use tensor matching to help predict masked words.", choices=['no', 'product', 'cosine', 'product_cosine']
     )
-    
     parser.add_argument("--cosine_space_dim", type=int, help="Reduce event embedding dimension.")
     parser.add_argument("--cosine_slices", type=int, help="Cosine matching perspectives.")
     parser.add_argument("--cosine_factor", type=int, help="Tensor factorization.")
-    
+    # 训练参数
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_test", action="store_true", help="Whether to run evaluation.")
     parser.add_argument("--do_predict", action="store_true", help="Whether to predict labels.")
-    
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")
     parser.add_argument("--num_train_epochs", default=3, type=int, help="Total number of training epochs to perform.")
     parser.add_argument("--batch_size", default=4, type=int)
@@ -62,3 +60,5 @@ def parse_args():
     parser.add_argument("--weight_decay", default=0.01, type=float, help="Weight decay if we apply some.")
     args = parser.parse_args()
     return args
+
+
