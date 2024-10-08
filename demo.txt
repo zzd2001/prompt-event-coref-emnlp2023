@@ -1,0 +1,32 @@
+document = 'Former Pakistani dancing girl commits suicide 12 years after horrific acid attack which left her looking "not human". She had undergone 39 separate surgeries to repair damage. Leapt to her death from sixth floor Rome building earlier this month. Her ex-husband was charged with attempted murder in 2002 but has since been acquitted.'
+
+ev1 = {
+    'offset': 38, 
+    'trigger': 'suicide', 
+    'args': [
+        {'mention': 'Former Pakistani dancing girl', 'role': 'participant'}
+    ]
+}
+ev3 = {
+    'offset': 88, 
+    'trigger': 'left', 
+    'args': [
+        {'mention': 'acid', 'role': 'participant'}, 
+        {'mention': 'her', 'role': 'participant'}
+    ]
+}
+ev4 = {
+    'offset': 168, 
+    'trigger': 'damage', 
+    'args': [
+        {'mention': 'She', 'role': 'participant'}
+    ]
+}
+ev5 = {
+    'offset': 189, 
+    'trigger': 'death', 
+    'args': [
+        {'mention': 'her', 'role': 'participant'}, 
+        {'mention': 'sixth floor Rome building', 'role': 'place'}
+    ]
+}

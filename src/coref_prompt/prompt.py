@@ -82,14 +82,14 @@ def create_event_context(
         core_context_middle += f"{s_tokens['e2e']}"
         # segment contain the two events
         core_context = core_context_before + core_context_middle + core_context_after
-        total_length = len(tokenizer.tokenize(core_context))
+        total_length = len(tokenizer.tokenize(core_context))   # 分词之后核心上下文的总长度
         before_context, after_context = '', ''
         if total_length > max_length: # cut segment
             before_after_length = (max_length - len(tokenizer.tokenize(core_context_middle))) // 2
             core_context_before = tokenizer.decode(tokenizer.encode(core_context_before)[1:-1][-before_after_length:])
             core_context_after = tokenizer.decode(tokenizer.encode(core_context_after)[1:-1][:before_after_length])
             core_context = core_context_before + core_context_middle + core_context_after
-            e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))
+            e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))  # 在新的core_context原文中的offset
         else: # create contexts before/after the host sentence
             e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))
             e_before, e_after = e1_sent_idx - 1, e1_sent_idx + 1
@@ -119,14 +119,14 @@ def create_event_context(
         assert core_context[tri1s_core_offset:tri1e_core_offset+1] == e1_trigger
         assert core_context[tri2s_core_offset:tri2e_core_offset+1] == e2_trigger
         return {
-            'type': 'same_sent', 
-            'core_context': core_context, 
-            'before_context': before_context, 
-            'after_context': after_context, 
-            'e1s_core_offset': e1s_offset, 
-            'e1e_core_offset': e1e_offset, 
-            'tri1s_core_offset': tri1s_core_offset, 
-            'tri1e_core_offset': tri1e_core_offset, 
+            'type': 'same_sent',   # 一定是same
+            'core_context': core_context,  # 就是加上特殊token的序列，这个在基础prompt是没有上下文的
+            'before_context': before_context,  # 无
+            'after_context': after_context, # 无
+            'e1s_core_offset': e1s_offset, # 实体1开始位置在核心上下文也就是句子中的下标
+            'e1e_core_offset': e1e_offset, # 实体1结束位置在核心上下文也就是句子中的下标
+            'tri1s_core_offset': tri1s_core_offset, # 实体1内容（去掉特殊token）开始位置在核心上下文也就是句子中的下标
+            'tri1e_core_offset': tri1e_core_offset, # 实体1内容（去掉特殊token）结束位置在核心上下文也就是句子中的下标
             'e2s_core_offset': e2s_offset, 
             'e2e_core_offset': e2e_offset, 
             'tri2s_core_offset': tri2s_core_offset, 
@@ -334,6 +334,7 @@ def create_mix_template(
         e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
         e1e_anchor_offset = len(e1_anchor_temp)
         e1_anchor_temp += f"{s_tokens['e1e']} {s_tokens['l2']}"
+        
         e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} {s_tokens['l6']} "
         e2s_anchor_offset = len(e2_anchor_temp)
         e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
@@ -412,9 +413,11 @@ def findall(p, s):
     while i != -1:
         yield i
         i = s.find(p, i+1)
-
+# create_arg_and_related_info_str这个函数暂时用不到
 def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_related_info:dict, select_arg_strategy:str, s_tokens:dict):
-
+    '''
+    这个函数的主要目的是根据给定的策略筛选出与另一个实体相关的参数。内部函数 select_args 会根据是否匹配另一个实体的相关参数，来决定筛选的条件，最终返回符合条件的参数列表
+    '''
     assert select_arg_strategy in ['no_filter', 'filter_related_args', 'filter_all']
 
     def select_args(my_args:list, other_related_info:dict, match_other_related_args:bool) -> list:

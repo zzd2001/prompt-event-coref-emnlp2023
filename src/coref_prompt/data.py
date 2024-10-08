@@ -1311,6 +1311,8 @@ if __name__ == '__main__':
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
+
+    
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
     singleton, short_link, long_link = 0, 0, 0
